@@ -1,14 +1,29 @@
 package com.example.proximityalert;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.apache.http.NameValuePair;
+import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.protocol.HttpContext;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import android.app.Dialog;
 import android.app.PendingIntent;
+import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.location.LocationManager;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.support.v4.app.FragmentActivity;
+import android.util.Log;
 import android.view.Menu;
+import android.view.View;
+import android.view.View.OnClickListener;
+import android.widget.Button;
 import android.widget.SeekBar;
 import android.widget.SeekBar.OnSeekBarChangeListener;
 import android.widget.Toast;
@@ -30,15 +45,26 @@ public class MainActivity extends FragmentActivity {
 	
 	
 	//public static final int RADIUS = 200;
+	private static final String TAG_SUCCESS = "success";
 	
 	private SeekBar Radius = null;
 	public static float progressChanged = 100;
+	private static String lat;
+	private static String lng;
+	private static String radius;
+	private static String idUser = "1";
+	private static String idPoint = "1";
 	//private Circle mCircle;
 	
 	GoogleMap googleMap;
 	LocationManager locationManager;
 	PendingIntent pendingIntent;
 	SharedPreferences sharedPreferences;
+	
+	private ProgressDialog pDialog;
+	JSONParser<HttpContext> jsonParser = new JSONParser<HttpContext>();
+	
+	private static final String url = "http://ec2-54-207-73-220.sa-east-1.compute.amazonaws.com/proximity_alert/sync.php";
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -75,22 +101,23 @@ public class MainActivity extends FragmentActivity {
     		sharedPreferences = getSharedPreferences("location", 0);
     		
     		// Getting stored latitude if exists else return 0
-    		String lat = sharedPreferences.getString("lat", "0");
+    		lat = sharedPreferences.getString("lat", "0");
     		
     		// Getting stored longitude if exists else return 0
-    		String lng = sharedPreferences.getString("lng", "0");
+    		lng = sharedPreferences.getString("lng", "0");
     		
     		// Getting stored zoom level if exists else return 0
     		String zoom = sharedPreferences.getString("zoom", "0");
     		
     		// Getting stored radius if exists else return 100
     		progressChanged = sharedPreferences.getFloat("radius", 100);
+    		radius = String.valueOf(progressChanged);
     		
     		// If coordinates are stored earlier
     		if(!lat.equals("0")){
     			
     			// Drawing circle on the map
-    			drawDynamicCircle(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)));
+    			drawCircle(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)), progressChanged);
     			
     			//mCircle.setRadius(Double.parseDouble(radius));
     			
@@ -131,7 +158,61 @@ public class MainActivity extends FragmentActivity {
                 */
     		}
     		
-            
+    		Radius = (SeekBar) findViewById(R.id.radius);
+			Radius.setOnSeekBarChangeListener(new OnSeekBarChangeListener() {
+				
+	            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser){
+	            	
+	                progressChanged = progress+20;
+	                //mCircle.setRadius(progress);
+	                drawCircle(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)), progressChanged);
+	            }
+	 
+	            public void onStartTrackingTouch(SeekBar seekBar) {
+	                // TODO Auto-generated method stub
+	            }
+	 
+	            public void onStopTrackingTouch(SeekBar seekBar) {
+	                Toast.makeText(MainActivity.this,progressChanged+" m", 
+	                        Toast.LENGTH_SHORT).show();
+	                
+	                drawCircle(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)), progressChanged);
+	                drawMarker(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)));
+	                // This intent will call the activity ProximityActivity
+			        Intent proximityIntent = new Intent("com.example.proximityalert.activity.proximity");					
+					
+			        // Creating a pending intent which will be invoked by LocationManager when the specified region is
+			        // entered or exited
+	                pendingIntent = PendingIntent.getActivity(getBaseContext(), 0, proximityIntent,Intent.FLAG_ACTIVITY_NEW_TASK);			        
+			        
+			        // Setting proximity alert 
+			        // The pending intent will be invoked when the device enters or exits the region with a dynamic radius
+			        // away from the marked point
+			        // The -1 indicates that, the monitor will not be expired
+			        locationManager.addProximityAlert(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)).latitude, new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)).longitude, progressChanged, -1, pendingIntent);	
+			        /** Opening the editor object to write data to sharedPreferences */
+			        SharedPreferences.Editor editor = sharedPreferences.edit();
+
+			        /** Storing the latitude of the current location to the shared preferences */
+			        editor.putString("lat", Double.toString(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)).latitude));
+			        lat = Double.toString(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)).latitude);
+			        /** Storing the longitude of the current location to the shared preferences */
+			        editor.putString("lng", Double.toString(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)).longitude));
+			        lng = Double.toString(new LatLng(Double.parseDouble(lat), Double.parseDouble(lng)).longitude);;
+			        /** Storing the zoom level to the shared preferences */
+			        editor.putString("zoom", Float.toString(googleMap.getCameraPosition().zoom));
+			        
+			        /** Storing the radius to the shared preferences */
+			        editor.putFloat("radius", progressChanged);
+			        radius = String.valueOf(progressChanged);
+			        /** Saving the values stored in the shared preferences */
+			        editor.commit();
+			        Log.v("latitude123", "uid="+lat);
+					Log.v("longitude123", "uid="+lng);
+					Log.v("radiua123", "uid="+radius);
+	            }
+	            });
+			
     		
             googleMap.setOnMapClickListener(new OnMapClickListener() {
 				
@@ -142,12 +223,14 @@ public class MainActivity extends FragmentActivity {
 					googleMap.clear();		
 										
 					// Drawing circle on the map
-					drawDynamicCircle(point);
+					//drawDynamicCircle(point);
+					drawCircle(point, progressChanged);
 					
 					// Drawing marker on the map
 					drawMarker(point);
 					
 					//Edit circle radius
+					
 					
 					
 			        // This intent will call the activity ProximityActivity
@@ -168,20 +251,22 @@ public class MainActivity extends FragmentActivity {
 
 			        /** Storing the latitude of the current location to the shared preferences */
 			        editor.putString("lat", Double.toString(point.latitude));
-			        
+			        lat = Double.toString(point.latitude);
 			        /** Storing the longitude of the current location to the shared preferences */
 			        editor.putString("lng", Double.toString(point.longitude));
-			        
+			        lng = Double.toString(point.longitude);
 			        /** Storing the zoom level to the shared preferences */
 			        editor.putString("zoom", Float.toString(googleMap.getCameraPosition().zoom));
 			        
 			        /** Storing the radius to the shared preferences */
 			        editor.putFloat("radius", progressChanged);
-
+			        radius = String.valueOf(progressChanged);
 			        /** Saving the values stored in the shared preferences */
 			        editor.commit();		        
-			        
-			        Toast.makeText(getBaseContext(), "Proximity Alert is added", Toast.LENGTH_SHORT).show();			        
+			        Log.v("latitude", "uid="+lat);
+					Log.v("longitude", "uid="+lng);
+					Log.v("radiua", "uid="+radius);
+			        //Toast.makeText(getBaseContext(), "Proximity Alert is added", Toast.LENGTH_SHORT).show();			        
 			        
 				}
 			});    
@@ -208,11 +293,23 @@ public class MainActivity extends FragmentActivity {
 			        // Committing the changes
 					editor.commit();
 					
-					Toast.makeText(getBaseContext(), "Proximity Alert is removed", Toast.LENGTH_LONG).show();
+					//Toast.makeText(getBaseContext(), "Proximity Alert is removed", Toast.LENGTH_LONG).show();
 				}
-			});           
-		}	
-	}	
+			});
+            
+            
+            final Button button = (Button) findViewById(R.id.sync_button);
+            button.setOnClickListener(new OnClickListener(){
+   		        @Override
+   		        //On click function
+   		        public void onClick(View view) {
+   		            //Create the intent to start another activity
+   		        	new SyncCloud().execute();
+   		        }
+   		    });
+		}
+	}
+		
 	
 	private void drawMarker(LatLng point){
 		// Creating an instance of MarkerOptions
@@ -224,64 +321,6 @@ public class MainActivity extends FragmentActivity {
 		// Adding marker on the Google Map
 		googleMap.addMarker(markerOptions);
 		
-	}
-	
-	
-	private void drawDynamicCircle(final LatLng point){
-		
-		drawCircle(point, progressChanged);
-		drawMarker(point);
-		
-		Radius = (SeekBar) findViewById(R.id.radius);
-		Radius.setOnSeekBarChangeListener(new OnSeekBarChangeListener() {
-			
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser){
-                progressChanged = progress+20;
-                //mCircle.setRadius(progress);
-                drawCircle(point, progressChanged);
-            }
- 
-            public void onStartTrackingTouch(SeekBar seekBar) {
-                // TODO Auto-generated method stub
-            }
- 
-            public void onStopTrackingTouch(SeekBar seekBar) {
-                Toast.makeText(MainActivity.this,progressChanged+" m", 
-                        Toast.LENGTH_SHORT).show();
-
-                drawMarker(point);
-                
-                // This intent will call the activity ProximityActivity
-		        Intent proximityIntent = new Intent("com.example.proximityalert.activity.proximity");					
-				
-		        // Creating a pending intent which will be invoked by LocationManager when the specified region is
-		        // entered or exited
-                pendingIntent = PendingIntent.getActivity(getBaseContext(), 0, proximityIntent,Intent.FLAG_ACTIVITY_NEW_TASK);			        
-		        
-		        // Setting proximity alert 
-		        // The pending intent will be invoked when the device enters or exits the region with a dynamic radius
-		        // away from the marked point
-		        // The -1 indicates that, the monitor will not be expired
-		        locationManager.addProximityAlert(point.latitude, point.longitude, progressChanged, -1, pendingIntent);	
-		        /** Opening the editor object to write data to sharedPreferences */
-		        SharedPreferences.Editor editor = sharedPreferences.edit();
-
-		        /** Storing the latitude of the current location to the shared preferences */
-		        editor.putString("lat", Double.toString(point.latitude));
-		        
-		        /** Storing the longitude of the current location to the shared preferences */
-		        editor.putString("lng", Double.toString(point.longitude));
-		        
-		        /** Storing the zoom level to the shared preferences */
-		        editor.putString("zoom", Float.toString(googleMap.getCameraPosition().zoom));
-		        
-		        /** Storing the radius to the shared preferences */
-		        editor.putFloat("radius", progressChanged);
-
-		        /** Saving the values stored in the shared preferences */
-		        editor.commit();
-            }
-        });
 	}
 	
 	
@@ -319,4 +358,74 @@ public class MainActivity extends FragmentActivity {
 		getMenuInflater().inflate(R.menu.main, menu);
 		return true;
 	}
+	
+	
+	
+	class SyncCloud extends AsyncTask<String, String, String> {
+		/**
+		 * Before starting background thread Show Progress Dialog
+		 * */
+		@Override
+		protected void onPreExecute() {
+			super.onPreExecute();
+			pDialog = new ProgressDialog(MainActivity.this);
+			pDialog.setMessage(getString(R.string.synchronizing));
+			pDialog.setIndeterminate(false);
+			pDialog.setCancelable(true);
+			pDialog.show();
+		}
+
+		@Override
+		protected String doInBackground(String... args) {
+						List<NameValuePair> params = new ArrayList<NameValuePair>();
+						params.add(new BasicNameValuePair("latitude", lat));
+						params.add(new BasicNameValuePair("longitude", lng));
+						params.add(new BasicNameValuePair("radius", radius));
+						params.add(new BasicNameValuePair("idUser", idUser));
+						params.add(new BasicNameValuePair("idPoint", idPoint));
+						
+						// getting JSON Object
+						
+						JSONObject json = jsonParser.makeHttpRequest(url,
+								"POST", params);
+						Log.v("-+-+-+---+-+-+++-++-", "json="+params);
+						// check log cat for response
+						Log.d("Create Response", json.toString());
+						Log.v("------------------", "uid="+lat);
+						Log.v("=============2", "uid="+lng);
+						Log.v("------------------", "uid="+idUser);
+						Log.v("------------------", "uid="+idPoint);
+						Log.v("------------------", "uid="+radius);
+						// check for success tag
+						try {
+							int success = json.getInt(TAG_SUCCESS);
+							Log.v("=============2", "uid="+lng);
+							if (success == 1) {
+								// successfull
+								
+							}
+							else{
+								
+							}
+						} catch (JSONException e) {
+							e.printStackTrace();
+
+
+				};
+		return null;		
+	}
+
+		/*
+		 * After completing background task Dismiss the progress dialog
+		 * **/
+		
+		@Override
+		protected void onPostExecute(String file_url) {
+			// dismiss the dialog once done
+			pDialog.dismiss();
+		}
+
+	}
 }
+
+
